@@ -329,26 +329,31 @@ def render_page(title, body_html):
     if last_order_data:
         nav_links.append(("/test", "Wyślij testową wiadomość"))
 
-    nav_html = "<nav><ul>" + "".join(
-        f"<li><a href='{href}'>{text}</a></li>" for href, text in nav_links
-    ) + "</ul></nav>"
+    nav_html = (
+        "<nav class='navbar navbar-expand-lg navbar-dark bg-dark mb-4'>"
+        "<div class='container justify-content-center'>"
+        "<div class='navbar-nav'>" +
+        "".join(
+            f"<a class='btn btn-secondary mx-2' href='{href}'>{text}</a>"
+            for href, text in nav_links
+        ) +
+        "</div></div></nav>"
+    )
 
     style = """
-    body { font-family: Arial, sans-serif; background: #f7f7f7; color: #222; margin: 20px; }
-    nav ul { list-style: none; padding: 0; margin-bottom: 20px; }
-    nav li { display: inline-block; margin-right: 15px; }
-    table { border-collapse: collapse; width: 100%; background: #fff; }
-    th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
-    h1 { margin-top: 0; }
+    .table-custom { width: 75%; margin-left: auto; margin-right: auto; }
     """
 
     return (
         "<!DOCTYPE html>"
         "<html><head><meta charset='utf-8'>"
         f"<title>{title}</title>"
+        "<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css'>"
         f"<style>{style}</style>"
-        "</head><body>"
-        f"{nav_html}<h1>{title}</h1>" + body_html + "</body></html>"
+        "</head><body class='bg-light p-4'>"
+        f"{nav_html}<h1 class='mb-4 text-center'>{title}</h1>" + body_html +
+        "<script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js'></script>" +
+        "</body></html>"
     )
 
 class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -364,15 +369,15 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/test":
             if last_order_data:
                 send_messenger_message(last_order_data)
-                body = "<p>✅ Testowa wiadomość została wysłana.</p>"
+                body = "<p class='w-75 mx-auto'>✅ Testowa wiadomość została wysłana.</p>"
             else:
-                body = "<p>⚠️ Brak danych ostatniego zamówienia.</p>"
+                body = "<p class='w-75 mx-auto'>⚠️ Brak danych ostatniego zamówienia.</p>"
             self._send(render_page("Test wiadomości", body))
         elif self.path == "/testprint":
             if print_test_page():
-                body = "<p>✅ Testowy wydruk wysłany.</p>"
+                body = "<p class='w-75 mx-auto'>✅ Testowy wydruk wysłany.</p>"
             else:
-                body = "<p>❌ Błąd testowego wydruku.</p>"
+                body = "<p class='w-75 mx-auto'>❌ Błąd testowego wydruku.</p>"
             self._send(render_page("Test wydruku", body))
         elif self.path == "/history":
             printed = load_printed_orders()
@@ -386,24 +391,26 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
                 for item in queue
             )
             table_html = (
-                "<table><tr><th>ID zamówienia</th><th>Czas</th></tr>" + rows + qrows + "</table>"
+                "<table class='table table-striped table-bordered table-custom bg-white'>"
+                "<thead><tr><th>ID zamówienia</th><th>Czas</th></tr></thead>"
+                "<tbody>" + rows + qrows + "</tbody></table>"
             )
             self._send(render_page("Historia drukowania", table_html))
         elif self.path == "/logs":
             try:
                 with open(LOG_FILE, "r") as f:
                     lines = f.readlines()[-200:]
-                log_html = "<pre>" + (
+                log_html = "<pre class='w-75 mx-auto bg-white p-3 border rounded overflow-auto'>" + (
                     "".join(lines)
                     .replace("&", "&amp;")
                     .replace("<", "&lt;")
                     .replace(">", "&gt;")
                 ) + "</pre>"
             except Exception as e:
-                log_html = f"<p>Błąd czytania logów: {e}</p>"
+                log_html = f"<p class='w-75 mx-auto'>Błąd czytania logów: {e}</p>"
             self._send(render_page("Logi", log_html))
         elif self.path == "/":
-            body = "<p>Wybierz opcję z menu powyżej.</p>"
+            body = "<p class='w-75 mx-auto'>Wybierz opcję z menu powyżej.</p>"
             self._send(render_page("BaseLinker Print Agent", body))
         else:
             self.send_error(404, "Nie znaleziono strony")
@@ -413,7 +420,7 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def send_error(self, code, message=None, explain=None):
         if code == 404:
-            body = "<p>Nie znaleziono strony.</p>"
+            body = "<p class='w-75 mx-auto'>Nie znaleziono strony.</p>"
             self._send(render_page("404 - Not Found", body), status=404)
         else:
             super().send_error(code, message, explain)
