@@ -11,6 +11,7 @@ import threading
 import http.server
 import socketserver
 import sqlite3
+import html
 from dotenv import load_dotenv
 
 # === WCZYTAJ Z .env ===
@@ -377,10 +378,12 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
             printed = load_printed_orders()
             queue = load_queue()
             rows = "".join(
-                f"<tr><td>{oid}</td><td>{ts}</td></tr>" for oid, ts in sorted(printed.items())
+                f"<tr><td>{html.escape(str(oid))}</td><td>{html.escape(str(ts))}</td></tr>"
+                for oid, ts in sorted(printed.items())
             )
             qrows = "".join(
-                f"<tr><td>{item.get('order_id')}</td><td>W kolejce</td></tr>" for item in queue
+                f"<tr><td>{html.escape(str(item.get('order_id')))}</td><td>W kolejce</td></tr>"
+                for item in queue
             )
             table_html = (
                 "<table><tr><th>ID zamówienia</th><th>Czas</th></tr>" + rows + qrows + "</table>"
