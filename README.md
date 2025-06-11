@@ -34,7 +34,7 @@ The following variables are supported:
 
 1. Install Python dependencies (requires Python 3):
    ```bash
-   pip install requests python-dotenv
+   pip install -r requirements.txt
    ```
 2. Copy `.env.example` to `.env` and fill in the required values.
 3. Start the agent:
