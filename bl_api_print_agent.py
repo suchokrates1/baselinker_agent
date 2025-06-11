@@ -30,10 +30,18 @@ PRINTED_EXPIRY_DAYS = int(os.getenv("PRINTED_EXPIRY_DAYS", "5"))
 LABEL_QUEUE = os.path.join(os.path.dirname(__file__), "queued_labels.jsonl")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DB_FILE = os.getenv("DATA_DB", os.path.join(os.path.dirname(__file__), "data.db"))
+ENABLE_HTTP_SERVER = os.getenv("ENABLE_HTTP_SERVER", "1").lower() in ("1", "true", "yes")
+LOG_FILE = os.getenv("LOG_FILE", os.path.join(os.path.dirname(__file__), "agent.log"))
+BOOTSTRAP_CSS = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+LOGO_URL = "https://retrievershop.pl/wp-content/uploads/2024/08/retriver-2.png"
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -43,6 +51,26 @@ HEADERS = {
 }
 
 last_order_data = {}
+
+def render_page(title: str, body_html: str) -> str:
+    return (
+        "<!doctype html>"
+        "<html lang='pl'>"
+        "<head>"
+        "<meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        f"<link rel='stylesheet' href='{BOOTSTRAP_CSS}'>"
+        "<style>\n"
+        ".content-wrapper{max-width:75%;margin:auto;}\n"
+        "</style>"
+        "</head><body>"
+        "<nav class='navbar navbar-light bg-light mb-4'>"
+        "<div class='container-fluid justify-content-center'>"
+        f"<a class='navbar-brand' href='/'><img src='{LOGO_URL}' alt='Retriever Shop' height='40' class='me-2'>{title}</a>"
+        "</div></nav>"
+        f"<div class='container content-wrapper'>{body_html}</div>"
+        "</body></html>"
+    )
 
 def ensure_db():
     conn = sqlite3.connect(DB_FILE)
@@ -227,6 +255,31 @@ def print_label(base64_data, extension, order_id):
     except Exception as e:
         logger.error(f"Błąd drukowania: {e}")
 
+def print_test_page():
+    try:
+        file_path = "/tmp/print_test.txt"
+        with open(file_path, "w") as f:
+            f.write("=== TEST PRINT ===\n")
+        result = subprocess.run([
+            "lp",
+            "-d",
+            PRINTER_NAME,
+            file_path,
+        ], capture_output=True)
+        os.remove(file_path)
+        if result.returncode != 0:
+            logger.error(
+                "Błąd testowego druku (kod %s): %s",
+                result.returncode,
+                result.stderr.decode().strip(),
+            )
+            return False
+        logger.info("🔧 Testowa strona została wysłana do drukarki.")
+        return True
+    except Exception as e:
+        logger.error(f"Błąd testowego druku: {e}")
+        return False
+
 def shorten_product_name(full_name):
     words = full_name.strip().split()
     if len(words) >= 3:
@@ -269,29 +322,76 @@ def is_quiet_time():
     else:
         return now >= QUIET_HOURS_START or now < QUIET_HOURS_END
 
-class TestRequestHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200 if self.path == "/test" and last_order_data else 404)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
+    def _send(self, content, status=200, content_type="text/html; charset=utf-8"):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
         self.end_headers()
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        self.wfile.write(content)
 
+    def do_GET(self):
         if self.path == "/test":
             if last_order_data:
                 send_messenger_message(last_order_data)
-                self.wfile.write("✅ Testowa wiadomość została wysłana.".encode("utf-8"))
+                self._send("✅ Testowa wiadomość została wysłana.")
             else:
-                self.wfile.write("⚠️ Brak danych ostatniego zamówienia.".encode("utf-8"))
+                self._send("⚠️ Brak danych ostatniego zamówienia.")
+        elif self.path == "/testprint":
+            if print_test_page():
+                self._send("✅ Testowy wydruk wysłany.")
+            else:
+                self._send("❌ Błąd testowego wydruku.")
+        elif self.path == "/history":
+            printed = load_printed_orders()
+            queue = load_queue()
+            rows = "".join(
+                f"<tr><td>{oid}</td><td>{ts}</td></tr>" for oid, ts in sorted(printed.items())
+            )
+            qrows = "".join(
+                f"<tr><td>{item.get('order_id')}</td><td>W kolejce</td></tr>" for item in queue
+            )
+            table_html = (
+                "<table class='table table-striped'><thead><tr><th>ID zamówienia</th><th>Czas</th></tr></thead><tbody>"
+                + rows + qrows + "</tbody></table>"
+            )
+            html = render_page("Historia drukowania", table_html + "<p><a href='/'>Powrót</a></p>")
+            self._send(html)
+        elif self.path == "/logs":
+            try:
+                with open(LOG_FILE, "r") as f:
+                    lines = f.readlines()[-200:]
+                log_html = "<pre>" + (
+                    "".join(lines)
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                ) + "</pre>"
+            except Exception as e:
+                log_html = f"<p>Błąd czytania logów: {e}</p>"
+            html = render_page("Logi", log_html + "<p><a href='/'>Powrót</a></p>")
+            self._send(html)
         else:
-            self.wfile.write("❌ Nieznany endpoint.".encode("utf-8"))
+            links = [
+                "<li class='nav-item'><a class='nav-link' href='/history'>Historia drukowania</a></li>",
+                "<li class='nav-item'><a class='nav-link' href='/logs'>Logi</a></li>",
+                "<li class='nav-item'><a class='nav-link' href='/testprint'>Testuj drukarkę</a></li>",
+            ]
+            if last_order_data:
+                links.append("<li class='nav-item'><a class='nav-link' href='/test'>Wyślij testową wiadomość</a></li>")
+            menu = "<ul class='nav flex-column text-center'>" + "".join(links) + "</ul>"
+            html = render_page("BaseLinker Print Agent", menu)
+            self._send(html)
 
     def log_message(self, format, *args):
         return
 
 def start_http_server():
     PORT = 8082
-    with socketserver.TCPServer(("", PORT), TestRequestHandler) as httpd:
+    with socketserver.TCPServer(("", PORT), AgentRequestHandler) as httpd:
         logger.info(
-            f"[HTTP] Endpoint testowy dostępny na porcie {PORT} — GET /test"
+            f"[HTTP] Serwer UI dostępny na porcie {PORT}"
         )
         httpd.serve_forever()
 
@@ -300,7 +400,8 @@ if __name__ == "__main__":
         "[START] Agent BaseLinker z automatycznym getLabel + Messenger + dotenv"
     )
     ensure_printed_file()
-    threading.Thread(target=start_http_server, daemon=True).start()
+    if ENABLE_HTTP_SERVER:
+        threading.Thread(target=start_http_server, daemon=True).start()
 
     while True:
         clean_old_printed_orders()

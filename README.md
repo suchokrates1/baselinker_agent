@@ -26,6 +26,8 @@ The following variables are supported:
 | `PRINTED_EXPIRY_DAYS` | How long to keep records of printed orders. | `5` |
 | `LOG_LEVEL` | Logging verbosity. | `INFO` |
 | `DATA_DB` | Path to the SQLite database file. | `data.db` in repo |
+| `ENABLE_HTTP_SERVER` | Start built-in HTTP UI (1/0). | `1` |
+| `LOG_FILE` | Path to the log file. | `agent.log` |
 
 ## Running
 
@@ -45,7 +47,14 @@ printed later.
 
 ## Optional HTTP Server
 
-A small HTTP server is started automatically on port `8082`. It provides a
-single endpoint `GET /test` that sends a Messenger message for the last processed
-order. This can be used to verify that Messenger integration works.
+A small HTTP server is started on port `8082` (if `ENABLE_HTTP_SERVER` is set).
+The interface uses [Bootstrap](https://getbootstrap.com/) for simple styling and provides the following endpoints:
+
+- `/` – main page with links
+- `/history` – list of printed and queued orders
+- `/logs` – recent log output
+- `/testprint` – send a test page to the printer
+- `/test` – send a test Messenger message for the last processed order
+
+This can be used to verify that the printer and Messenger integrations work. The main menu is centered and tables take up the middle 75% of the page.
 
