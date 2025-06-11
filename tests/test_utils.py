@@ -48,6 +48,32 @@ def test_mark_and_load_printed(tmp_path, monkeypatch):
     assert "abc" in orders
 
 
+def test_mark_as_printed_deduplicates(tmp_path, monkeypatch):
+    db = tmp_path / "test_dupes.db"
+    monkeypatch.setattr(bl, "DB_FILE", str(db))
+    bl.ensure_db()
+
+    import datetime as dt
+
+    class DummyDateTime(dt.datetime):
+        ts = dt.datetime.fromisoformat("2023-01-01T00:00:00")
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.ts
+
+    monkeypatch.setattr(bl, "datetime", DummyDateTime)
+
+    bl.mark_as_printed("xyz")
+    first = bl.load_printed_orders()["xyz"]
+
+    DummyDateTime.ts = dt.datetime.fromisoformat("2024-02-02T00:00:00")
+    bl.mark_as_printed("xyz")
+    second = bl.load_printed_orders()["xyz"]
+
+    assert first == second
+
+
 def test_queue_roundtrip(tmp_path, monkeypatch):
     db = tmp_path / "queue.db"
     monkeypatch.setattr(bl, "DB_FILE", str(db))

@@ -132,7 +132,7 @@ def mark_as_printed(order_id):
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
     cur.execute(
-        "INSERT OR REPLACE INTO printed_orders(order_id, printed_at) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO printed_orders(order_id, printed_at) VALUES (?, ?)",
         (order_id, datetime.now().isoformat()),
     )
     conn.commit()
