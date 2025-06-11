@@ -32,6 +32,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DB_FILE = os.getenv("DATA_DB", os.path.join(os.path.dirname(__file__), "data.db"))
 ENABLE_HTTP_SERVER = os.getenv("ENABLE_HTTP_SERVER", "1").lower() in ("1", "true", "yes")
 LOG_FILE = os.getenv("LOG_FILE", os.path.join(os.path.dirname(__file__), "agent.log"))
+HTTP_PORT = int(os.getenv("HTTP_PORT", "8082"))
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -385,10 +386,9 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
         return
 
 def start_http_server():
-    PORT = 8082
-    with socketserver.TCPServer(("", PORT), AgentRequestHandler) as httpd:
+    with socketserver.TCPServer(("", HTTP_PORT), AgentRequestHandler) as httpd:
         logger.info(
-            f"[HTTP] Serwer UI dostępny na porcie {PORT}"
+            f"[HTTP] Serwer UI dostępny na porcie {HTTP_PORT}"
         )
         httpd.serve_forever()
 
