@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import threading
 import http.server
 import socketserver
+import sqlite3
 from dotenv import load_dotenv
 
 # === WCZYTAJ Z .env ===
@@ -26,6 +27,7 @@ BASE_URL = "https://api.baselinker.com/connector.php"
 PRINTED_FILE = os.path.join(os.path.dirname(__file__), "printed_orders.txt")
 PRINTED_EXPIRY_DAYS = int(os.getenv("PRINTED_EXPIRY_DAYS", "5"))
 LABEL_QUEUE = os.path.join(os.path.dirname(__file__), "queued_labels.jsonl")
+DB_FILE = os.getenv("DATA_DB", os.path.join(os.path.dirname(__file__), "data.db"))
 
 HEADERS = {
     "X-BLToken": API_TOKEN,
@@ -34,56 +36,125 @@ HEADERS = {
 
 last_order_data = {}
 
+def ensure_db():
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS printed_orders(order_id TEXT PRIMARY KEY, printed_at TEXT)"
+    )
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS label_queue(order_id TEXT, label_data TEXT, ext TEXT, last_order_data TEXT)"
+    )
+    conn.commit()
+
+    # migrate old printed orders
+    if os.path.exists(PRINTED_FILE):
+        cur.execute("SELECT COUNT(*) FROM printed_orders")
+        if cur.fetchone()[0] == 0:
+            with open(PRINTED_FILE, "r") as f:
+                for line in f:
+                    if "," in line:
+                        oid, ts = line.strip().split(",")
+                        cur.execute(
+                            "INSERT OR IGNORE INTO printed_orders(order_id, printed_at) VALUES (?, ?)",
+                            (oid, ts),
+                        )
+            conn.commit()
+    if os.path.exists(LABEL_QUEUE):
+        cur.execute("SELECT COUNT(*) FROM label_queue")
+        if cur.fetchone()[0] == 0:
+            with open(LABEL_QUEUE, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                        cur.execute(
+                            "INSERT INTO label_queue(order_id, label_data, ext, last_order_data) VALUES (?, ?, ?, ?)",
+                            (
+                                item.get("order_id"),
+                                item.get("label_data"),
+                                item.get("ext"),
+                                json.dumps(item.get("last_order_data", {})),
+                            ),
+                        )
+                    except Exception as e:
+                        print(f"❌ Błąd migracji z {LABEL_QUEUE}: {e}")
+            conn.commit()
+    conn.close()
+
 def ensure_printed_file():
-    if not os.path.exists(PRINTED_FILE):
-        with open(PRINTED_FILE, "w") as f:
-            f.write("")
+    ensure_db()
 
 def load_printed_orders():
-    ensure_printed_file()
-    orders = {}
-    with open(PRINTED_FILE, "r") as f:
-        for line in f:
-            if "," in line:
-                order_id, ts = line.strip().split(",")
-                orders[order_id] = datetime.fromisoformat(ts)
+    ensure_db()
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("SELECT order_id, printed_at FROM printed_orders")
+    rows = cur.fetchall()
+    conn.close()
+    orders = {oid: datetime.fromisoformat(ts) for oid, ts in rows}
     return orders
 
 def mark_as_printed(order_id):
-    with open(PRINTED_FILE, "a") as f:
-        f.write(f"{order_id},{datetime.now().isoformat()}\n")
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO printed_orders(order_id, printed_at) VALUES (?, ?)",
+        (order_id, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
 
 def clean_old_printed_orders():
-    orders = load_printed_orders()
     threshold = datetime.now() - timedelta(days=PRINTED_EXPIRY_DAYS)
-    new_orders = {oid: ts for oid, ts in orders.items() if ts > threshold}
-    with open(PRINTED_FILE, "w") as f:
-        for oid, ts in new_orders.items():
-            f.write(f"{oid},{ts.isoformat()}\n")
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM printed_orders WHERE printed_at < ?", (threshold.isoformat(),))
+    conn.commit()
+    conn.close()
 
 def ensure_queue_file():
-    if not os.path.exists(LABEL_QUEUE):
-        with open(LABEL_QUEUE, "w") as f:
-            f.write("")
+    ensure_db()
 
 def load_queue():
-    ensure_queue_file()
+    ensure_db()
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("SELECT order_id, label_data, ext, last_order_data FROM label_queue")
+    rows = cur.fetchall()
+    conn.close()
     items = []
-    with open(LABEL_QUEUE, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                items.append(json.loads(line))
-            except Exception as e:
-                print(f"❌ Błąd ładowania z {LABEL_QUEUE}: {e}")
+    for order_id, label_data, ext, last_order_json in rows:
+        try:
+            last_data = json.loads(last_order_json) if last_order_json else {}
+        except Exception:
+            last_data = {}
+        items.append({
+            "order_id": order_id,
+            "label_data": label_data,
+            "ext": ext,
+            "last_order_data": last_data,
+        })
     return items
 
 def save_queue(items):
-    with open(LABEL_QUEUE, "w") as f:
-        for item in items:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM label_queue")
+    for item in items:
+        cur.execute(
+            "INSERT INTO label_queue(order_id, label_data, ext, last_order_data) VALUES (?, ?, ?, ?)",
+            (
+                item.get("order_id"),
+                item.get("label_data"),
+                item.get("ext"),
+                json.dumps(item.get("last_order_data", {})),
+            ),
+        )
+    conn.commit()
+    conn.close()
 
 def call_api(method, parameters={}):
     try:
