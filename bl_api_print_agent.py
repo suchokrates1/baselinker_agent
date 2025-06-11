@@ -395,6 +395,7 @@ if __name__ == "__main__":
                 try:
                     print_label(item["label_data"], item.get("ext", "pdf"), item["order_id"])
                     mark_as_printed(item["order_id"])
+                    printed[item["order_id"]] = datetime.now()
                     send_messenger_message(item.get("last_order_data", {}))
                 except Exception as e:
                     logger.error(f"Błąd przetwarzania z kolejki: {e}")
