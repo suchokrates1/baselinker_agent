@@ -59,3 +59,10 @@ It serves a minimal UI with the following endpoints:
 
 This can be used to verify that the printer and Messenger integrations work.
 
+
+## Tests
+
+To run the unit tests use:
+```bash
+pytest
+```
