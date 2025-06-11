@@ -25,6 +25,7 @@ QUIET_HOURS_END = int(os.getenv("QUIET_HOURS_END", "22"))
 BASE_URL = "https://api.baselinker.com/connector.php"
 PRINTED_FILE = os.path.join(os.path.dirname(__file__), "printed_orders.txt")
 PRINTED_EXPIRY_DAYS = int(os.getenv("PRINTED_EXPIRY_DAYS", "5"))
+LABEL_QUEUE = os.path.join(os.path.dirname(__file__), "queued_labels.jsonl")
 
 HEADERS = {
     "X-BLToken": API_TOKEN,
@@ -59,6 +60,30 @@ def clean_old_printed_orders():
     with open(PRINTED_FILE, "w") as f:
         for oid, ts in new_orders.items():
             f.write(f"{oid},{ts.isoformat()}\n")
+
+def ensure_queue_file():
+    if not os.path.exists(LABEL_QUEUE):
+        with open(LABEL_QUEUE, "w") as f:
+            f.write("")
+
+def load_queue():
+    ensure_queue_file()
+    items = []
+    with open(LABEL_QUEUE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                items.append(json.loads(line))
+            except Exception as e:
+                print(f"❌ Błąd ładowania z {LABEL_QUEUE}: {e}")
+    return items
+
+def save_queue(items):
+    with open(LABEL_QUEUE, "w") as f:
+        for item in items:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 def call_api(method, parameters={}):
     try:
@@ -179,6 +204,19 @@ if __name__ == "__main__":
     while True:
         clean_old_printed_orders()
         printed = load_printed_orders()
+        queue = load_queue()
+
+        if not is_quiet_time():
+            for item in queue[:]:
+                try:
+                    print_label(item["label_data"], item.get("ext", "pdf"), item["order_id"])
+                    mark_as_printed(item["order_id"])
+                    send_messenger_message(item.get("last_order_data", {}))
+                except Exception as e:
+                    print(f"❌ Błąd przetwarzania z kolejki: {e}")
+                    continue
+                queue.remove(item)
+            save_queue(queue)
 
         try:
             orders = get_orders()
@@ -212,14 +250,21 @@ if __name__ == "__main__":
                     if label_data:
                         if is_quiet_time():
                             print("🕒 Cisza nocna — etykieta nie zostanie wydrukowana teraz.")
+                            queue.append({
+                                "order_id": order_id,
+                                "label_data": label_data,
+                                "ext": ext,
+                                "last_order_data": last_order_data,
+                            })
                         else:
                             print_label(label_data, ext, order_id)
-                        mark_as_printed(order_id)
-                        send_messenger_message(last_order_data)
+                            mark_as_printed(order_id)
+                            send_messenger_message(last_order_data)
                     else:
                         print("  ❌ Brak etykiety (label_data = null)")
 
         except Exception as e:
             print(f"[BŁĄD GŁÓWNY] {e}")
 
+        save_queue(queue)
         time.sleep(POLL_INTERVAL)
