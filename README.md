@@ -27,6 +27,7 @@ The following variables are supported:
 | `LOG_LEVEL` | Logging verbosity. | `INFO` |
 | `DATA_DB` | Path to the SQLite database file. | `data.db` in repo |
 | `ENABLE_HTTP_SERVER` | Start built-in HTTP UI (1/0). | `1` |
+| `HTTP_PORT` | Port for the built-in HTTP UI. | `8082` |
 | `LOG_FILE` | Path to the log file. | `agent.log` |
 
 ## Running
@@ -47,7 +48,7 @@ printed later.
 
 ## Optional HTTP Server
 
-A small HTTP server is started on port `8082` (if `ENABLE_HTTP_SERVER` is set).
+A small HTTP server is started on the port specified by `HTTP_PORT` (default `8082`) if `ENABLE_HTTP_SERVER` is set.
 It serves a minimal UI with the following endpoints:
 
 - `/` – main page with links
