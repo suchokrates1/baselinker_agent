@@ -98,7 +98,7 @@ def ensure_db():
             conn.commit()
     conn.close()
 
-def ensure_printed_file():
+def ensure_db_init():
     ensure_db()
 
 def load_printed_orders():
@@ -381,7 +381,7 @@ if __name__ == "__main__":
     logger.info(
         "[START] Agent BaseLinker z automatycznym getLabel + Messenger + dotenv"
     )
-    ensure_printed_file()
+    ensure_db_init()
     if ENABLE_HTTP_SERVER:
         threading.Thread(target=start_http_server, daemon=True).start()
 
