@@ -391,16 +391,22 @@ if __name__ == "__main__":
         queue = load_queue()
 
         if not is_quiet_time():
-            for item in queue[:]:
+            grouped = {}
+            for item in queue:
+                grouped.setdefault(item["order_id"], []).append(item)
+
+            new_queue = []
+            for oid, items in grouped.items():
                 try:
-                    print_label(item["label_data"], item.get("ext", "pdf"), item["order_id"])
-                    mark_as_printed(item["order_id"])
-                    printed[item["order_id"]] = datetime.now()
-                    send_messenger_message(item.get("last_order_data", {}))
+                    for it in items:
+                        print_label(it["label_data"], it.get("ext", "pdf"), it["order_id"])
+                    mark_as_printed(oid)
+                    printed[oid] = datetime.now()
                 except Exception as e:
                     logger.error(f"Błąd przetwarzania z kolejki: {e}")
-                    continue
-                queue.remove(item)
+                    new_queue.extend(items)
+
+            queue = new_queue
             save_queue(queue)
 
         try:
@@ -423,6 +429,7 @@ if __name__ == "__main__":
                     f"📜 Zamówienie {order_id} ({last_order_data['name']})"
                 )
                 packages = get_order_packages(order_id)
+                labels = []
 
                 for p in packages:
                     package_id = p.get("package_id")
@@ -437,22 +444,31 @@ if __name__ == "__main__":
 
                     label_data, ext = get_label(courier_code, package_id)
                     if label_data:
-                        if is_quiet_time():
-                            logger.info(
-                                "🕒 Cisza nocna — etykieta nie zostanie wydrukowana teraz."
-                            )
+                        labels.append((label_data, ext))
+                    else:
+                        logger.warning("  ❌ Brak etykiety (label_data = null)")
+
+                if labels:
+                    if is_quiet_time():
+                        logger.info(
+                            "🕒 Cisza nocna — etykiety nie zostaną wydrukowane teraz."
+                        )
+                        for label_data, ext in labels:
                             queue.append({
                                 "order_id": order_id,
                                 "label_data": label_data,
                                 "ext": ext,
                                 "last_order_data": last_order_data,
                             })
-                        else:
-                            print_label(label_data, ext, order_id)
-                            mark_as_printed(order_id)
-                            send_messenger_message(last_order_data)
+                        send_messenger_message(last_order_data)
+                        mark_as_printed(order_id)
+                        printed[order_id] = datetime.now()
                     else:
-                        logger.warning("  ❌ Brak etykiety (label_data = null)")
+                        for label_data, ext in labels:
+                            print_label(label_data, ext, order_id)
+                        send_messenger_message(last_order_data)
+                        mark_as_printed(order_id)
+                        printed[order_id] = datetime.now()
 
         except Exception as e:
             logger.error(f"[BŁĄD GŁÓWNY] {e}")
