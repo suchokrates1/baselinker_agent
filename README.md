@@ -49,7 +49,7 @@ printed later.
 ## Optional HTTP Server
 
 A small HTTP server is started on the port specified by `HTTP_PORT` (default `8082`) if `ENABLE_HTTP_SERVER` is set.
-It serves a minimal UI with the following endpoints:
+The UI is styled using [Bootstrap](https://getbootstrap.com/) and exposes the following endpoints:
 
 - `/` – main page with links
 - `/history` – list of printed and queued orders
