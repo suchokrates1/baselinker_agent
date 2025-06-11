@@ -48,7 +48,7 @@ printed later.
 ## Optional HTTP Server
 
 A small HTTP server is started on port `8082` (if `ENABLE_HTTP_SERVER` is set).
-It serves a minimal UI with the following endpoints:
+The interface uses [Bootstrap](https://getbootstrap.com/) for simple styling and provides the following endpoints:
 
 - `/` – main page with links
 - `/history` – list of printed and queued orders
@@ -56,5 +56,5 @@ It serves a minimal UI with the following endpoints:
 - `/testprint` – send a test page to the printer
 - `/test` – send a test Messenger message for the last processed order
 
-This can be used to verify that the printer and Messenger integrations work.
+This can be used to verify that the printer and Messenger integrations work. The main menu is centered and tables take up the middle 75% of the page.
 

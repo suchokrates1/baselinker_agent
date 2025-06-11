@@ -32,6 +32,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DB_FILE = os.getenv("DATA_DB", os.path.join(os.path.dirname(__file__), "data.db"))
 ENABLE_HTTP_SERVER = os.getenv("ENABLE_HTTP_SERVER", "1").lower() in ("1", "true", "yes")
 LOG_FILE = os.getenv("LOG_FILE", os.path.join(os.path.dirname(__file__), "agent.log"))
+BOOTSTRAP_CSS = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+LOGO_URL = "https://retrievershop.pl/wp-content/uploads/2024/08/retriver-2.png"
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -49,6 +51,26 @@ HEADERS = {
 }
 
 last_order_data = {}
+
+def render_page(title: str, body_html: str) -> str:
+    return (
+        "<!doctype html>"
+        "<html lang='pl'>"
+        "<head>"
+        "<meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        f"<link rel='stylesheet' href='{BOOTSTRAP_CSS}'>"
+        "<style>\n"
+        ".content-wrapper{max-width:75%;margin:auto;}\n"
+        "</style>"
+        "</head><body>"
+        "<nav class='navbar navbar-light bg-light mb-4'>"
+        "<div class='container-fluid justify-content-center'>"
+        f"<a class='navbar-brand' href='/'><img src='{LOGO_URL}' alt='Retriever Shop' height='40' class='me-2'>{title}</a>"
+        "</div></nav>"
+        f"<div class='container content-wrapper'>{body_html}</div>"
+        "</body></html>"
+    )
 
 def ensure_db():
     conn = sqlite3.connect(DB_FILE)
@@ -330,12 +352,11 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
             qrows = "".join(
                 f"<tr><td>{item.get('order_id')}</td><td>W kolejce</td></tr>" for item in queue
             )
-            html = (
-                "<html><body><h1>Historia drukowania</h1>"
-                "<table border='1'><tr><th>ID zamówienia</th><th>Czas</th></tr>"
-                + rows + qrows + "</table>"
-                "<p><a href='/'>Powrót</a></p></body></html>"
+            table_html = (
+                "<table class='table table-striped'><thead><tr><th>ID zamówienia</th><th>Czas</th></tr></thead><tbody>"
+                + rows + qrows + "</tbody></table>"
             )
+            html = render_page("Historia drukowania", table_html + "<p><a href='/'>Powrót</a></p>")
             self._send(html)
         elif self.path == "/logs":
             try:
@@ -349,21 +370,18 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
                 ) + "</pre>"
             except Exception as e:
                 log_html = f"<p>Błąd czytania logów: {e}</p>"
-            html = (
-                "<html><body><h1>Logi</h1>" + log_html + "<p><a href='/'>Powrót</a></p></body></html>"
-            )
+            html = render_page("Logi", log_html + "<p><a href='/'>Powrót</a></p>")
             self._send(html)
         else:
-            html = (
-                "<html><body><h1>BaseLinker Print Agent</h1>"
-                "<ul>"
-                "<li><a href='/history'>Historia drukowania</a></li>"
-                "<li><a href='/logs'>Logi</a></li>"
-                "<li><a href='/testprint'>Testuj drukarkę</a></li>"
-            )
+            links = [
+                "<li class='nav-item'><a class='nav-link' href='/history'>Historia drukowania</a></li>",
+                "<li class='nav-item'><a class='nav-link' href='/logs'>Logi</a></li>",
+                "<li class='nav-item'><a class='nav-link' href='/testprint'>Testuj drukarkę</a></li>",
+            ]
             if last_order_data:
-                html += "<li><a href='/test'>Wyślij testową wiadomość</a></li>"
-            html += "</ul></body></html>"
+                links.append("<li class='nav-item'><a class='nav-link' href='/test'>Wyślij testową wiadomość</a></li>")
+            menu = "<ul class='nav flex-column text-center'>" + "".join(links) + "</ul>"
+            html = render_page("BaseLinker Print Agent", menu)
             self._send(html)
 
     def log_message(self, format, *args):
