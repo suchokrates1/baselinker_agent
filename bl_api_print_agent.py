@@ -402,12 +402,21 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 log_html = f"<p>Błąd czytania logów: {e}</p>"
             self._send(render_page("Logi", log_html))
-        else:
+        elif self.path == "/":
             body = "<p>Wybierz opcję z menu powyżej.</p>"
             self._send(render_page("BaseLinker Print Agent", body))
+        else:
+            self.send_error(404, "Nie znaleziono strony")
 
     def log_message(self, format, *args):
         return
+
+    def send_error(self, code, message=None, explain=None):
+        if code == 404:
+            body = "<p>Nie znaleziono strony.</p>"
+            self._send(render_page("404 - Not Found", body), status=404)
+        else:
+            super().send_error(code, message, explain)
 
 def start_http_server():
     with socketserver.TCPServer(("", HTTP_PORT), AgentRequestHandler) as httpd:
