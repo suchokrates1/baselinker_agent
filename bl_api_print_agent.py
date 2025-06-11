@@ -316,6 +316,40 @@ def is_quiet_time():
     else:
         return now >= QUIET_HOURS_START or now < QUIET_HOURS_END
 
+
+def render_page(title, body_html):
+    """Return a full HTML document with basic styling and navigation."""
+    nav_links = [
+        ("/", "Strona główna"),
+        ("/history", "Historia drukowania"),
+        ("/logs", "Logi"),
+        ("/testprint", "Testuj drukarkę"),
+    ]
+    if last_order_data:
+        nav_links.append(("/test", "Wyślij testową wiadomość"))
+
+    nav_html = "<nav><ul>" + "".join(
+        f"<li><a href='{href}'>{text}</a></li>" for href, text in nav_links
+    ) + "</ul></nav>"
+
+    style = """
+    body { font-family: Arial, sans-serif; background: #f7f7f7; color: #222; margin: 20px; }
+    nav ul { list-style: none; padding: 0; margin-bottom: 20px; }
+    nav li { display: inline-block; margin-right: 15px; }
+    table { border-collapse: collapse; width: 100%; background: #fff; }
+    th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+    h1 { margin-top: 0; }
+    """
+
+    return (
+        "<!DOCTYPE html>"
+        "<html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        f"<style>{style}</style>"
+        "</head><body>"
+        f"{nav_html}<h1>{title}</h1>" + body_html + "</body></html>"
+    )
+
 class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
     def _send(self, content, status=200, content_type="text/html; charset=utf-8"):
         self.send_response(status)
@@ -329,14 +363,16 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/test":
             if last_order_data:
                 send_messenger_message(last_order_data)
-                self._send("✅ Testowa wiadomość została wysłana.")
+                body = "<p>✅ Testowa wiadomość została wysłana.</p>"
             else:
-                self._send("⚠️ Brak danych ostatniego zamówienia.")
+                body = "<p>⚠️ Brak danych ostatniego zamówienia.</p>"
+            self._send(render_page("Test wiadomości", body))
         elif self.path == "/testprint":
             if print_test_page():
-                self._send("✅ Testowy wydruk wysłany.")
+                body = "<p>✅ Testowy wydruk wysłany.</p>"
             else:
-                self._send("❌ Błąd testowego wydruku.")
+                body = "<p>❌ Błąd testowego wydruku.</p>"
+            self._send(render_page("Test wydruku", body))
         elif self.path == "/history":
             printed = load_printed_orders()
             queue = load_queue()
@@ -346,13 +382,10 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
             qrows = "".join(
                 f"<tr><td>{item.get('order_id')}</td><td>W kolejce</td></tr>" for item in queue
             )
-            html = (
-                "<html><body><h1>Historia drukowania</h1>"
-                "<table border='1'><tr><th>ID zamówienia</th><th>Czas</th></tr>"
-                + rows + qrows + "</table>"
-                "<p><a href='/'>Powrót</a></p></body></html>"
+            table_html = (
+                "<table><tr><th>ID zamówienia</th><th>Czas</th></tr>" + rows + qrows + "</table>"
             )
-            self._send(html)
+            self._send(render_page("Historia drukowania", table_html))
         elif self.path == "/logs":
             try:
                 with open(LOG_FILE, "r") as f:
@@ -365,22 +398,10 @@ class AgentRequestHandler(http.server.BaseHTTPRequestHandler):
                 ) + "</pre>"
             except Exception as e:
                 log_html = f"<p>Błąd czytania logów: {e}</p>"
-            html = (
-                "<html><body><h1>Logi</h1>" + log_html + "<p><a href='/'>Powrót</a></p></body></html>"
-            )
-            self._send(html)
+            self._send(render_page("Logi", log_html))
         else:
-            html = (
-                "<html><body><h1>BaseLinker Print Agent</h1>"
-                "<ul>"
-                "<li><a href='/history'>Historia drukowania</a></li>"
-                "<li><a href='/logs'>Logi</a></li>"
-                "<li><a href='/testprint'>Testuj drukarkę</a></li>"
-            )
-            if last_order_data:
-                html += "<li><a href='/test'>Wyślij testową wiadomość</a></li>"
-            html += "</ul></body></html>"
-            self._send(html)
+            body = "<p>Wybierz opcję z menu powyżej.</p>"
+            self._send(render_page("BaseLinker Print Agent", body))
 
     def log_message(self, format, *args):
         return
