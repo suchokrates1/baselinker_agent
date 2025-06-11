@@ -50,6 +50,21 @@ HEADERS = {
 
 last_order_data = {}
 
+def validate_env():
+    """Ensure mandatory environment variables are present."""
+    required = {
+        "API_TOKEN": API_TOKEN,
+        "PAGE_ACCESS_TOKEN": PAGE_ACCESS_TOKEN,
+        "RECIPIENT_ID": RECIPIENT_ID,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        logger.error(
+            "Brak wymaganych zmiennych środowiskowych: %s",
+            ", ".join(missing),
+        )
+        raise SystemExit(1)
+
 def ensure_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
@@ -381,6 +396,7 @@ if __name__ == "__main__":
     logger.info(
         "[START] Agent BaseLinker z automatycznym getLabel + Messenger + dotenv"
     )
+    validate_env()
     ensure_db_init()
     if ENABLE_HTTP_SERVER:
         threading.Thread(target=start_http_server, daemon=True).start()
