@@ -5,6 +5,7 @@ import time
 import base64
 import os
 import subprocess
+import logging
 from datetime import datetime, timedelta
 import threading
 import http.server
@@ -27,7 +28,14 @@ BASE_URL = "https://api.baselinker.com/connector.php"
 PRINTED_FILE = os.path.join(os.path.dirname(__file__), "printed_orders.txt")
 PRINTED_EXPIRY_DAYS = int(os.getenv("PRINTED_EXPIRY_DAYS", "5"))
 LABEL_QUEUE = os.path.join(os.path.dirname(__file__), "queued_labels.jsonl")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DB_FILE = os.getenv("DATA_DB", os.path.join(os.path.dirname(__file__), "data.db"))
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 HEADERS = {
     "X-BLToken": API_TOKEN,
@@ -80,7 +88,7 @@ def ensure_db():
                             ),
                         )
                     except Exception as e:
-                        print(f"❌ Błąd migracji z {LABEL_QUEUE}: {e}")
+                        logger.error(f"Błąd migracji z {LABEL_QUEUE}: {e}")
             conn.commit()
     conn.close()
 
@@ -162,20 +170,27 @@ def call_api(method, parameters={}):
             "method": method,
             "parameters": json.dumps(parameters)
         }
-        response = requests.post(BASE_URL, headers=HEADERS, data=payload)
-        print(f"[{method}] {response.status_code}")
+        response = requests.post(
+            BASE_URL, headers=HEADERS, data=payload, timeout=10
+        )
+        logger.info(f"[{method}] {response.status_code}")
         return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error in call_api({method}): {e}")
     except Exception as e:
-        print(f"❌ Błąd w call_api({method}): {e}")
-        return {}
+        logger.error(f"Błąd w call_api({method}): {e}")
+    return {}
 
 def get_orders():
     response = call_api("getOrders", {
         "status_id": STATUS_ID
     })
-    print(f"🔁 Surowa odpowiedź:\n{json.dumps(response, indent=2, ensure_ascii=False)}")
+    logger.info(
+        "🔁 Surowa odpowiedź:\n%s",
+        json.dumps(response, indent=2, ensure_ascii=False),
+    )
     orders = response.get("orders", [])
-    print(f"🔍 Zamówień znalezionych: {len(orders)}")
+    logger.info(f"🔍 Zamówień znalezionych: {len(orders)}")
     return orders
 
 def get_order_packages(order_id):
@@ -197,11 +212,20 @@ def print_label(base64_data, extension, order_id):
         pdf_data = base64.b64decode(base64_data)
         with open(file_path, "wb") as f:
             f.write(pdf_data)
-        subprocess.run(["lp", "-d", PRINTER_NAME, file_path])
+        result = subprocess.run(
+            ["lp", "-d", PRINTER_NAME, file_path], capture_output=True
+        )
         os.remove(file_path)
-        print(f"📨 Etykieta wydrukowana dla zamówienia {order_id}")
+        if result.returncode != 0:
+            logger.error(
+                "Błąd drukowania (kod %s): %s",
+                result.returncode,
+                result.stderr.decode().strip(),
+            )
+        else:
+            logger.info(f"📨 Etykieta wydrukowana dla zamówienia {order_id}")
     except Exception as e:
-        print(f"❌ Błąd drukowania: {e}")
+        logger.error(f"Błąd drukowania: {e}")
 
 def shorten_product_name(full_name):
     words = full_name.strip().split()
@@ -230,11 +254,13 @@ def send_messenger_message(data):
                 "message": {"text": message}
             })
         )
-        print(f"📬 Messenger response: {response.status_code} {response.text}")
+        logger.info(
+            "📬 Messenger response: %s %s", response.status_code, response.text
+        )
         response.raise_for_status()
-        print("✅ Wiadomość została wysłana przez Messengera.")
+        logger.info("✅ Wiadomość została wysłana przez Messengera.")
     except Exception as e:
-        print(f"❌ Błąd wysyłania wiadomości: {e}")
+        logger.error(f"Błąd wysyłania wiadomości: {e}")
 
 def is_quiet_time():
     now = datetime.now().hour
@@ -264,11 +290,15 @@ class TestRequestHandler(http.server.BaseHTTPRequestHandler):
 def start_http_server():
     PORT = 8082
     with socketserver.TCPServer(("", PORT), TestRequestHandler) as httpd:
-        print(f"[HTTP] Endpoint testowy dostępny na porcie {PORT} — GET /test")
+        logger.info(
+            f"[HTTP] Endpoint testowy dostępny na porcie {PORT} — GET /test"
+        )
         httpd.serve_forever()
 
 if __name__ == "__main__":
-    print("[START] Agent BaseLinker z automatycznym getLabel + Messenger + dotenv")
+    logger.info(
+        "[START] Agent BaseLinker z automatycznym getLabel + Messenger + dotenv"
+    )
     ensure_printed_file()
     threading.Thread(target=start_http_server, daemon=True).start()
 
@@ -284,7 +314,7 @@ if __name__ == "__main__":
                     mark_as_printed(item["order_id"])
                     send_messenger_message(item.get("last_order_data", {}))
                 except Exception as e:
-                    print(f"❌ Błąd przetwarzania z kolejki: {e}")
+                    logger.error(f"Błąd przetwarzania z kolejki: {e}")
                     continue
                 queue.remove(item)
             save_queue(queue)
@@ -305,22 +335,28 @@ if __name__ == "__main__":
                 if order_id in printed:
                     continue
 
-                print(f"📜 Zamówienie {order_id} ({last_order_data['name']})")
+                logger.info(
+                    f"📜 Zamówienie {order_id} ({last_order_data['name']})"
+                )
                 packages = get_order_packages(order_id)
 
                 for p in packages:
                     package_id = p.get("package_id")
                     courier_code = p.get("courier_code")
                     if not package_id or not courier_code:
-                        print("  ⚠️ Brak danych: package_id lub courier_code")
+                        logger.warning(
+                            "  Brak danych: package_id lub courier_code"
+                        )
                         continue
 
-                    print(f"  📦 Paczka {package_id} (kurier: {courier_code})")
+                    logger.info(f"  📦 Paczka {package_id} (kurier: {courier_code})")
 
                     label_data, ext = get_label(courier_code, package_id)
                     if label_data:
                         if is_quiet_time():
-                            print("🕒 Cisza nocna — etykieta nie zostanie wydrukowana teraz.")
+                            logger.info(
+                                "🕒 Cisza nocna — etykieta nie zostanie wydrukowana teraz."
+                            )
                             queue.append({
                                 "order_id": order_id,
                                 "label_data": label_data,
@@ -332,10 +368,10 @@ if __name__ == "__main__":
                             mark_as_printed(order_id)
                             send_messenger_message(last_order_data)
                     else:
-                        print("  ❌ Brak etykiety (label_data = null)")
+                        logger.warning("  ❌ Brak etykiety (label_data = null)")
 
         except Exception as e:
-            print(f"[BŁĄD GŁÓWNY] {e}")
+            logger.error(f"[BŁĄD GŁÓWNY] {e}")
 
         save_queue(queue)
         time.sleep(POLL_INTERVAL)
